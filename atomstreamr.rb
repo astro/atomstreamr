@@ -1,4 +1,5 @@
 require 'eventmachine'
+require 'evma_xmlpushparser'
 require 'uri'
 require 'rexml/document'
 require 'libxml'
@@ -14,11 +15,13 @@ class ATOMStreamer < EventMachine::Connection
 
   def initialize(args)
     super
-    @uri, @callback = args
+    @uri, callback = args
     @http_resp = ''
-    @parser = LibXML::XML::SaxParser.new
-    @parser.callbacks = self
-    @elem = nil
+    @parser = Parser.new(callback)
+  end
+
+  def post_init
+    @parser.post_init
   end
 
   def connection_completed
@@ -37,10 +40,11 @@ class ATOMStreamer < EventMachine::Connection
       data = t.to_s
     end
 
-    @parser.parse(data)
+    @parser.receive_data(data)
   end
 
   def unbind
+    @parser.unbind
     EM::stop
   end
 
@@ -48,30 +52,40 @@ class ATOMStreamer < EventMachine::Connection
   # You'll need a modified LibXML-Ruby SAX parser
   #
   # gem sources -a http://gems.github.com
-  # gem install astro-libxml-ruby
-  include LibXML::XML::SaxParser::Callbacks
+  # gem install julien51-eventmachine_xmlpushparser
+  class Parser
+    def initialize(callback)
+      @callback = callback
+      @elem = nil
+    end
 
-  def on_start_element(name, attributes = {})
-    if @elem.nil? && name == 'atomStream'
-    else
-      e = REXML::Element.new(name)
-      attributes.each do |n,v|
-        if n
-          e.attributes[n] = v
-        else
-          e.add_namespace v
+    include EventMachine::XmlPushParser
+
+    def end_document
+      EM::stop
+    end
+    def start_element(name, attributes = {})
+      if @elem.nil? && name == 'atomStream'
+      else
+        e = REXML::Element.new(name)
+        attributes.each do |n,v|
+          if n == 'xmlns'
+            e.add_namespace v
+          else
+            e.attributes[n] = v
+          end
         end
+        @elem = @elem ? @elem.add(e) : e
       end
-      @elem = @elem ? @elem.add(e) : e
     end
-  end
-  def on_end_element(element)
-    if @elem
-      @callback.call(@elem) unless @elem.parent
-      @elem = @elem.parent
+    def end_element(element)
+      if @elem
+        @callback.call(@elem) unless @elem.parent
+        @elem = @elem.parent
+      end
     end
-  end
-  def on_characters(text)
-    @elem.add(REXML::Text.new(text)) if @elem
+    def characters(text)
+      @elem.add(REXML::Text.new(text)) if @elem
+    end
   end
 end
