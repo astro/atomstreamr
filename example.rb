@@ -13,5 +13,8 @@ def on_element(e)
   end
 end
 
-a = ATOMStreamer.new &method(:on_element)
-a.run('http://updates.sixapart.com/atom-stream.xml')
+EM::run do
+  ATOMStreamer.run 'http://updates.sixapart.com/atom-stream.xml', &method(:on_element)
+end
+
+
